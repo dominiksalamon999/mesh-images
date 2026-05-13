@@ -5,10 +5,10 @@ Render 3D meshes inside Unity UI using an atlased RenderTexture system.
 MeshImages lets you display 3D objects as UI elements efficiently by rendering meshes into a shared atlas and displaying them through standard Unity UI components.
 
 Features
-- Render 3D meshes inside uGUI (Canvas UI)
+- Render 3D meshes inside Canvas UI
 - Shared atlas-based RenderTexture system
-- Efficient batching for multiple UI mesh previews
 - Works at runtime
+- Works at editor
 - Lightweight and extensible
 - Designed for tooling, inventories, previews, and UI displays
 

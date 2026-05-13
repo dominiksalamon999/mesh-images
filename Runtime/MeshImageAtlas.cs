@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -14,9 +14,15 @@ namespace MeshImages
     [RequireComponent(typeof(Camera))]
     public class MeshImageAtlas : MonoBehaviour
     {
+        // ============================================================
+        // Constants
+        // ============================================================
+        #region Constants
+
         private const float MinFitDimension = 1e-5f;
         private const string RuntimeObjectName = "MeshImage_Runtime";
 
+        // Atlas texture configuration
         private const int AtlasSize = 1536;
         private const GraphicsFormat AtlasColorFormat = GraphicsFormat.R8G8B8A8_SRGB;
         private const GraphicsFormat AtlasDepthFormat = GraphicsFormat.D24_UNorm_S8_UInt;
@@ -26,6 +32,26 @@ namespace MeshImages
         private const int AtlasAnisoLevel = 0;
         private const bool AtlasUseMipMap = false;
         private const bool AtlasAutoGenerateMips = false;
+
+        #endregion
+
+        // ============================================================
+        // Nested Types
+        // ============================================================
+        #region Nested Types
+
+        private struct AtlasEntry
+        {
+            public GameObject Object;
+            public int Slot;
+        }
+
+        #endregion
+
+        // ============================================================
+        // Serialized Fields
+        // ============================================================
+        #region Serialized Fields
 
         [Header("References")]
         [SerializeField] private Camera atlasCamera;
@@ -51,17 +77,12 @@ namespace MeshImages
         [Header("Render")]
         [SerializeField] private float renderFps = 5f;
 
-        private float ViewHalfExtent => atlasCamera != null ? atlasCamera.orthographicSize : 0f;
-        private float ViewSize => 2f * ViewHalfExtent;
-        private float CellSize => ViewSize / gridSize;
-        private float CellFillSize => objectFillFraction * CellSize;
-        private int MaxSlots => gridSize * gridSize;
+        #endregion
 
-        private struct AtlasEntry
-        {
-            public GameObject Object;
-            public int Slot;
-        }
+        // ============================================================
+        // Private State
+        // ============================================================
+        #region Private State
 
         private readonly Dictionary<MeshImage, AtlasEntry> _pairs = new();
         private readonly Queue<int> _freeSlots = new();
@@ -72,11 +93,29 @@ namespace MeshImages
         // Runtime-only, not serialized. Always created and owned by this component.
         private RenderTexture atlasTexture;
 
+        #endregion
+
+        // ============================================================
+        // Properties
+        // ============================================================
+        #region Properties
+
         public static MeshImageAtlas Instance { get; private set; }
         public RenderTexture Texture => atlasTexture;
         public Camera Camera => atlasCamera;
 
-        // ---------- Lifecycle ----------
+        private float ViewHalfExtent => atlasCamera != null ? atlasCamera.orthographicSize : 0f;
+        private float ViewSize => 2f * ViewHalfExtent;
+        private float CellSize => ViewSize / gridSize;
+        private float CellFillSize => objectFillFraction * CellSize;
+        private int MaxSlots => gridSize * gridSize;
+
+        #endregion
+
+        // ============================================================
+        // Unity Lifecycle
+        // ============================================================
+        #region Unity Lifecycle
 
         private void OnEnable()
         {
@@ -131,102 +170,18 @@ namespace MeshImages
             if (renderFps < 0f) renderFps = 0f;
         }
 
-        private void CreateAtlasTexture()
-        {
-            if (atlasTexture != null) return;
-
-            atlasTexture = new RenderTexture(AtlasSize, AtlasSize, AtlasColorFormat, AtlasDepthFormat)
-            {
-                name = $"{name}_AutoAtlas",
-                antiAliasing = AtlasAntiAliasing,
-                filterMode = AtlasFilterMode,
-                wrapMode = AtlasWrapMode,
-                anisoLevel = AtlasAnisoLevel,
-                useMipMap = AtlasUseMipMap,
-                autoGenerateMips = AtlasAutoGenerateMips,
-                hideFlags = HideFlags.HideAndDontSave,
-            };
-            atlasTexture.Create();
-        }
-
-        private void ReleaseAtlasTexture()
-        {
-            if (atlasTexture == null) return;
-
-            if (atlasCamera != null && atlasCamera.targetTexture == atlasTexture)
-                atlasCamera.targetTexture = null;
-
-            atlasTexture.Release();
-            DestroySafe(atlasTexture);
-            atlasTexture = null;
-        }
-
         private void LateUpdate()
         {
             if (!Application.isPlaying) return;
             TryRender(Time.unscaledTimeAsDouble);
         }
 
-#if UNITY_EDITOR
-        private void OnEditorUpdate()
-        {
-            if (this == null) { EditorApplication.update -= OnEditorUpdate; return; }
-            if (Application.isPlaying) return;
-            TryRender(EditorApplication.timeSinceStartup);
-        }
-#endif
+        #endregion
 
-        private void TryRender(double now)
-        {
-            if (atlasCamera == null) return;
-            if (atlasTexture == null) return;
-
-            if (atlasCamera.targetTexture != atlasTexture)
-                atlasCamera.targetTexture = atlasTexture;
-
-#if UNITY_EDITOR
-            if (EditorApplication.isCompiling) return;
-            if (EditorApplication.isUpdating) return;
-            if (BuildPipeline.isBuildingPlayer) return;
-#endif
-
-            if (renderFps > 0f)
-            {
-                double interval = 1.0 / renderFps;
-                if (now - _lastRenderTime < interval) return;
-            }
-            _lastRenderTime = now;
-
-            atlasCamera.Render();
-        }
-
-        private void ValidateConfiguration()
-        {
-            if (defaultMaterial == null)
-                Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': no defaultMaterial assigned.", this);
-
-            if (!atlasCamera.orthographic)
-                Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': camera is not orthographic.", this);
-
-            if (atlasCamera.cullingMask == 0)
-                Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': camera culling mask is empty.", this);
-        }
-
-        // Pick the lowest layer present in the camera's culling mask so previews
-        // are guaranteed to be rendered. If the mask is empty, fall back to the
-        // camera GameObject's own layer.
-        private int ResolvePreviewLayer()
-        {
-            int mask = atlasCamera.cullingMask;
-            if (mask != 0)
-            {
-                for (int i = 0; i < 32; i++)
-                    if ((mask & (1 << i)) != 0) return i;
-            }
-            return atlasCamera.gameObject.layer;
-        }
-
-        // ---------- Public API ----------
+        // ============================================================
+        // Public API
+        // ============================================================
+        #region Public API
 
         public void Add(MeshImage image, Mesh mesh, Material material,
                         Vector3 position, Vector3 rotation, Vector3 scale)
@@ -245,10 +200,14 @@ namespace MeshImages
             _pairs.Remove(image);
         }
 
-        // ---------- Core ----------
+        #endregion
 
-        private bool TryAdd(MeshImage image, Mesh mesh, Material material,
-                            Vector3 position, Vector3 eulerRotation, Vector3 scale)
+        // ============================================================
+        // Core: Add Pipeline
+        // ============================================================
+        #region Core: Add Pipeline
+
+        private bool TryAdd(MeshImage image, Mesh mesh, Material material, Vector3 position, Vector3 eulerRotation, Vector3 scale)
         {
             if (image == null) return false;
             if (_pairs.ContainsKey(image)) return false;
@@ -315,12 +274,20 @@ namespace MeshImages
             return go;
         }
 
+        #endregion
+
+        // ============================================================
+        // Slot Management
+        // ============================================================
+        #region Slot Management
+
         private bool TryAcquireSlot(out int slot)
         {
             if (_freeSlots.Count > 0) { slot = _freeSlots.Dequeue(); return true; }
             if (_nextSlot >= MaxSlots)
             {
-                Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': atlas is full " + $"({MaxSlots} slots). Increase gridSize or remove a MeshImage.", this);
+                Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': atlas is full " +
+                                 $"({MaxSlots} slots). Increase gridSize or remove a MeshImage.", this);
                 slot = -1;
                 return false;
             }
@@ -343,7 +310,6 @@ namespace MeshImages
                 v - 2f * pad);
         }
 
-    
         private Vector3 GetSlotLocalPosition(int slot, Vector3 offset)
         {
             int col = slot % gridSize;
@@ -356,7 +322,114 @@ namespace MeshImages
             return new Vector3(x, y, previewDepth) + offset;
         }
 
-       
+        #endregion
+
+        // ============================================================
+        // Atlas Texture
+        // ============================================================
+        #region Atlas Texture
+
+        private void CreateAtlasTexture()
+        {
+            if (atlasTexture != null) return;
+
+            atlasTexture = new RenderTexture(AtlasSize, AtlasSize, AtlasColorFormat, AtlasDepthFormat)
+            {
+                name = $"{name}_AutoAtlas",
+                antiAliasing = AtlasAntiAliasing,
+                filterMode = AtlasFilterMode,
+                wrapMode = AtlasWrapMode,
+                anisoLevel = AtlasAnisoLevel,
+                useMipMap = AtlasUseMipMap,
+                autoGenerateMips = AtlasAutoGenerateMips,
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            atlasTexture.Create();
+        }
+
+        private void ReleaseAtlasTexture()
+        {
+            if (atlasTexture == null) return;
+
+            if (atlasCamera != null && atlasCamera.targetTexture == atlasTexture)
+                atlasCamera.targetTexture = null;
+
+            atlasTexture.Release();
+            DestroySafe(atlasTexture);
+            atlasTexture = null;
+        }
+
+        #endregion
+
+        // ============================================================
+        // Rendering
+        // ============================================================
+        #region Rendering
+
+        private void TryRender(double now)
+        {
+            if (atlasCamera == null) return;
+            if (atlasTexture == null) return;
+
+            if (atlasCamera.targetTexture != atlasTexture)
+                atlasCamera.targetTexture = atlasTexture;
+
+#if UNITY_EDITOR
+            if (EditorApplication.isCompiling) return;
+            if (EditorApplication.isUpdating) return;
+            if (BuildPipeline.isBuildingPlayer) return;
+#endif
+
+            if (renderFps > 0f)
+            {
+                double interval = 1.0 / renderFps;
+                if (now - _lastRenderTime < interval) return;
+            }
+            _lastRenderTime = now;
+
+            atlasCamera.Render();
+        }
+
+        #endregion
+
+        // ============================================================
+        // Configuration & Validation
+        // ============================================================
+        #region Configuration & Validation
+
+        private void ValidateConfiguration()
+        {
+            if (defaultMaterial == null)
+                Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': no defaultMaterial assigned.", this);
+
+            if (!atlasCamera.orthographic)
+                Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': camera is not orthographic.", this);
+
+            if (atlasCamera.cullingMask == 0)
+                Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': camera culling mask is empty.", this);
+        }
+
+        // Pick the lowest layer present in the camera's culling mask so previews
+        // are guaranteed to be rendered. If the mask is empty, fall back to the
+        // camera GameObject's own layer.
+        private int ResolvePreviewLayer()
+        {
+            int mask = atlasCamera.cullingMask;
+            if (mask != 0)
+            {
+                for (int i = 0; i < 32; i++)
+                    if ((mask & (1 << i)) != 0) return i;
+            }
+            return atlasCamera.gameObject.layer;
+        }
+
+        #endregion
+
+        // ============================================================
+        // Geometry Helpers
+        // ============================================================
+        #region Geometry Helpers
+
         private static Bounds ComputeRotatedScaledAabb(Mesh mesh, Vector3 scale, Quaternion rotation)
         {
             var b = mesh.bounds;
@@ -393,7 +466,22 @@ namespace MeshImages
             Destroy(obj);
         }
 
-#if UNITY_EDITOR
+        #endregion
+
+        // ============================================================
+        // Editor Only
+        // ============================================================
+
+        #region Editor Only
+        #if UNITY_EDITOR
+
+        private void OnEditorUpdate()
+        {
+            if (this == null) { EditorApplication.update -= OnEditorUpdate; return; }
+            if (Application.isPlaying) return;
+            TryRender(EditorApplication.timeSinceStartup);
+        }
+
         private void OnEditorSceneOpened(UnityEngine.SceneManagement.Scene scene, OpenSceneMode mode)
         {
             EditorApplication.delayCall += EditorRegisterAllImages;
@@ -408,6 +496,9 @@ namespace MeshImages
                 if (img != null && img.isActiveAndEnabled)
                     img.EditorReregister();
         }
-#endif
+
+
+        #endif
+        #endregion
     }
 }

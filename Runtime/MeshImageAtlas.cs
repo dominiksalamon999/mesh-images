@@ -320,8 +320,7 @@ namespace MeshImages
             if (_freeSlots.Count > 0) { slot = _freeSlots.Dequeue(); return true; }
             if (_nextSlot >= MaxSlots)
             {
-                Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': atlas is full " +
-                                 $"({MaxSlots} slots). Increase gridSize or remove a MeshImage.", this);
+                Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': atlas is full " + $"({MaxSlots} slots). Increase gridSize or remove a MeshImage.", this);
                 slot = -1;
                 return false;
             }
@@ -344,7 +343,7 @@ namespace MeshImages
                 v - 2f * pad);
         }
 
-        // Slot center in camera-local space. Top-left of the view = (-ViewHalfExtent, +ViewHalfExtent).
+    
         private Vector3 GetSlotLocalPosition(int slot, Vector3 offset)
         {
             int col = slot % gridSize;
@@ -357,7 +356,7 @@ namespace MeshImages
             return new Vector3(x, y, previewDepth) + offset;
         }
 
-        // AABB of mesh.bounds after applying scale and rotation. Translation is ignored.
+       
         private static Bounds ComputeRotatedScaledAabb(Mesh mesh, Vector3 scale, Quaternion rotation)
         {
             var b = mesh.bounds;

@@ -12,10 +12,8 @@ namespace MeshImages
     [DisallowMultipleComponent]
     public class MeshImage : RawImage
     {
-        [Header("Preview")]
         [SerializeField] private Mesh mesh;
-        [FormerlySerializedAs("material")]
-        [SerializeField] private Material previewMaterial;
+        [SerializeField] private new Material material;
 
         [SerializeField] private Vector3 translation;
         [SerializeField] private Vector3 rotation;
@@ -33,8 +31,8 @@ namespace MeshImages
             if (mesh != null && this.mesh != mesh)
             { this.mesh = mesh; changed = true; }
 
-            if (material != null && this.previewMaterial != material)
-            { this.previewMaterial = material; changed = true; }
+            if (material != null && this.material != material)
+            { this.material = material; changed = true; }
 
             if (rotation.HasValue && this.rotation != rotation.Value)
             { this.rotation = rotation.Value; changed = true; }
@@ -78,7 +76,7 @@ namespace MeshImages
             if (texture == null && _atlas.Texture != null)
                 texture = _atlas.Texture;
 
-            _atlas.Add(this, mesh, previewMaterial, translation, rotation, scale);
+            _atlas.Add(this, mesh, material, translation, rotation, scale);
 
             _registered = true;
         }

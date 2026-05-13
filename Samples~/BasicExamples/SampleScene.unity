@@ -184,7 +184,7 @@ MonoBehaviour:
     width: 0.12857144
     height: 0.12857144
   mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
-  previewMaterial: {fileID: 2100000, guid: cc09eb0c6566cb44bac3699e16356725, type: 2}
+  previewMaterial: {fileID: 2100000, guid: 9a558da7d6521a942bf8855b3ecf47dc, type: 2}
   translation: {x: 0, y: 0, z: 0}
   rotation: {x: -35.8, y: 49.3, z: -944.66}
   scale: {x: 1, y: 1, z: 1}
@@ -590,7 +590,7 @@ Transform:
   m_GameObject: {fileID: 1605787290}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -12.81937, y: 0.00001, z: -63.84838}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -653,7 +653,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MeshImages.Runtime::MeshImages.MeshImageAtlas
   atlasCamera: {fileID: 1605787294}
-  defaultMaterial: {fileID: 0}
+  defaultMaterial: {fileID: 2100000, guid: 9a558da7d6521a942bf8855b3ecf47dc, type: 2}
   gridSize: 7
   objectFillFraction: 0.9
   uvPaddingFraction: 0.05
@@ -696,7 +696,7 @@ Camera:
   far clip plane: 1000
   field of view: 60
   orthographic: 1
-  orthographic size: 454
+  orthographic size: 1000
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2

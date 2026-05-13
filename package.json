@@ -17,5 +17,12 @@
   "author": {
     "name": "Dominik Salamon",
     "url": "https://github.com/dominiksalamon999"
-  }
+  },
+ "samples": [
+    {
+      "displayName": "Basic Example",
+      "description": "Simple MeshImages setup demo.",
+      "path": "Samples~/Basic Example"
+    }
+  ]
 }

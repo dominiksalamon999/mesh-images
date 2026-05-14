@@ -53,14 +53,7 @@ namespace MeshImages
         [Tooltip("Idle re-render rate cap (fps). Changes always render immediately. 0 = no idle re-renders.")]
         [SerializeField] private float renderFps = 5f;
 
-        [Header("URP (play mode only)")]
-        [Tooltip("URP renderer-feature names (substring match, case-insensitive) to temporarily " +
-                 "disable around each atlas render. Useful for excluding fog or full-screen " +
-                 "post-process renderer features that ignore the camera's renderPostProcessing " +
-                 "flag (e.g. Atmospheric Height Fog). Only active in play mode and builds — " +
-                 "edit-mode renders are not affected so the editor scene stays correct.")]
-        [SerializeField] private string[] disableRendererFeaturesByName = new[] { "AtmosphericHeightFog" };
-
+       
         // ---------------- State ----------------
         private readonly Dictionary<MeshImage, AtlasEntry> _pairs = new();
         private readonly Queue<int> _freeSlots = new();
@@ -71,8 +64,6 @@ namespace MeshImages
         private bool _dirty = true, _autoSpawned, _srpFallbackWarned;
         private RenderTexture atlasTexture;
 
-        // URP renderer-feature toggle cache (reflection so URP isn't a hard dependency).
-        private List<ScriptableObject> _featuresToToggle;
         private static MethodInfo _setActiveMethod;
 
         private static bool _isQuitting;
@@ -190,7 +181,7 @@ namespace MeshImages
 
             BuildSlotPool();
             ValidateConfiguration();
-            ResolveRendererFeaturesToToggle();
+    
 
             // Re-place registrations carried across disable/enable so
             // MeshImages aren't stranded on a released RT.
@@ -206,7 +197,7 @@ namespace MeshImages
             // Keep _pairs across disable so re-enabling can re-place every image.
             DestroySlotPool();
             ReleaseAtlasTexture();
-            _featuresToToggle = null;
+
 #if UNITY_EDITOR
             ToggleEditorHooks(false);
             _editorRenderQueued = _deactivateQueued = false;
@@ -517,86 +508,25 @@ namespace MeshImages
             RenderAtlasCamera();
         }
 
-        // SRP-aware render. Built-in's Camera.Render() doesn't work in URP/HDRP
-        // builds — it silently no-ops, leaving the RT uninitialized (white).
-        // On SRP we submit a render request that the pipeline understands.
         private void RenderAtlasCamera()
         {
             if (GraphicsSettings.currentRenderPipeline != null)
             {
-                var req = new RenderPipeline.StandardRequest { destination = atlasTexture };
+                var req = new RenderPipeline.StandardRequest
+                {
+                    destination = atlasTexture
+                };
+
                 if (RenderPipeline.SupportsRenderRequest(atlasCamera, req))
                 {
-                    // Disable/restore configured URP renderer features around the
-                    // submission. Play-mode only — edit-mode renders skip this so
-                    // editing in the scene view stays stable.
-                    bool toggling = Application.isPlaying
-                                    && _featuresToToggle != null && _featuresToToggle.Count > 0;
-                    if (toggling) SetFeaturesActive(false);
-                    try { RenderPipeline.SubmitRenderRequest(atlasCamera, req); }
-                    finally { if (toggling) SetFeaturesActive(true); }
+                    RenderPipeline.SubmitRenderRequest(atlasCamera, req);
                     return;
                 }
-                if (!_srpFallbackWarned)
-                {
-                    _srpFallbackWarned = true;
-                    Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': active render " +
-                                     $"pipeline does not support SubmitRenderRequest; falling " +
-                                     $"back to Camera.Render(). This may not work in builds.", this);
-                }
+
+                Debug.LogWarning("SRP does not support render requests.");
             }
+
             atlasCamera.Render();
-        }
-
-        // ---------------- URP renderer-feature toggle ----------------
-        private void ResolveRendererFeaturesToToggle()
-        {
-            _featuresToToggle = null;
-            if (GraphicsSettings.currentRenderPipeline == null) return;
-            if (disableRendererFeaturesByName == null || disableRendererFeaturesByName.Length == 0) return;
-
-            // URP asset stores its renderer data list in a private field.
-            var pipelineAsset = GraphicsSettings.currentRenderPipeline;
-            var listField = pipelineAsset.GetType().GetField("m_RendererDataList",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            if (listField?.GetValue(pipelineAsset) is not System.Array rendererDataList
-                || rendererDataList.Length == 0) return;
-
-            foreach (var rendererData in rendererDataList)
-            {
-                if (rendererData == null) continue;
-                var featuresProp = rendererData.GetType().GetProperty("rendererFeatures");
-                if (featuresProp?.GetValue(rendererData) is not System.Collections.IList features) continue;
-
-                foreach (var feature in features)
-                    if (feature is ScriptableObject so && MatchesAnyName(so))
-                        (_featuresToToggle ??= new List<ScriptableObject>()).Add(so);
-            }
-
-            if (_setActiveMethod == null && _featuresToToggle != null && _featuresToToggle.Count > 0)
-                _setActiveMethod = _featuresToToggle[0].GetType()
-                    .GetMethod("SetActive", new[] { typeof(bool) });
-        }
-
-        private bool MatchesAnyName(ScriptableObject feature)
-        {
-            string typeName = feature.GetType().Name, objectName = feature.name;
-            for (int i = 0; i < disableRendererFeaturesByName.Length; i++)
-            {
-                var pat = disableRendererFeaturesByName[i];
-                if (string.IsNullOrEmpty(pat)) continue;
-                if (typeName.IndexOf(pat, System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
-                if (objectName.IndexOf(pat, System.StringComparison.OrdinalIgnoreCase) >= 0) return true;
-            }
-            return false;
-        }
-
-        private void SetFeaturesActive(bool active)
-        {
-            if (_featuresToToggle == null || _setActiveMethod == null) return;
-            var args = new object[] { active };
-            for (int i = 0; i < _featuresToToggle.Count; i++)
-                if (_featuresToToggle[i] != null) _setActiveMethod.Invoke(_featuresToToggle[i], args);
         }
 
         // ---------------- Validation & layer ----------------

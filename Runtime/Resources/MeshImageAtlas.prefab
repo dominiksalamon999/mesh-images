@@ -12,7 +12,7 @@ GameObject:
   - component: {fileID: 6785043919333939670}
   - component: {fileID: 3300627437550437546}
   - component: {fileID: 3110879680259153996}
-  m_Layer: 0
+  m_Layer: 5
   m_Name: MeshImageAtlas
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -73,7 +73,7 @@ Camera:
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 32
   m_RenderingPath: -1
   m_TargetTexture: {fileID: 0}
   m_TargetDisplay: 0
@@ -106,6 +106,8 @@ MonoBehaviour:
   autoFit: 1
   autoCenter: 1
   renderFps: 5
+  disableRendererFeaturesByName:
+  - AtmosphericHeightFog
 --- !u!114 &3110879680259153996
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -126,7 +128,7 @@ MonoBehaviour:
   m_RendererIndex: -1
   m_VolumeLayerMask:
     serializedVersion: 2
-    m_Bits: 1
+    m_Bits: 32
   m_VolumeTrigger: {fileID: 0}
   m_VolumeFrameworkUpdateModeOption: 2
   m_RenderPostProcessing: 0

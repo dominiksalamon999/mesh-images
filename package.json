@@ -1,6 +1,6 @@
 {
   "name": "com.dominiksalamon999.mesh-images",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "displayName": "Mesh Images",
   "description": "Render 3D meshes as UI elements via an atlased RenderTexture. Drop a MeshImage on a Canvas, assign a mesh, and a shared MeshImageAtlas takes care of the rest.",
   "unity": "2022.3",

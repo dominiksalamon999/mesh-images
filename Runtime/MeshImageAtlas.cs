@@ -585,6 +585,32 @@ namespace MeshImages
             }
             _lastRenderTime = now;
             _dirty = false;
+            RenderAtlasCamera();
+        }
+
+        private bool _srpFallbackWarned;
+
+        // SRP-aware render. Built-in's Camera.Render() doesn't work in URP/HDRP
+        // builds — it silently no-ops, leaving the RT uninitialized (white).
+        // On SRP we submit a render request that the pipeline understands.
+        private void RenderAtlasCamera()
+        {
+            if (GraphicsSettings.currentRenderPipeline != null)
+            {
+                var req = new RenderPipeline.StandardRequest { destination = atlasTexture };
+                if (RenderPipeline.SupportsRenderRequest(atlasCamera, req))
+                {
+                    RenderPipeline.SubmitRenderRequest(atlasCamera, req);
+                    return;
+                }
+                if (!_srpFallbackWarned)
+                {
+                    _srpFallbackWarned = true;
+                    Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': active render " +
+                                     $"pipeline does not support SubmitRenderRequest; falling " +
+                                     $"back to Camera.Render(). This may not work in builds.", this);
+                }
+            }
             atlasCamera.Render();
         }
 

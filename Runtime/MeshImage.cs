@@ -62,11 +62,16 @@ namespace MeshImages
             if (_registered) return;
 
             // Re-resolve every time; cached refs can be stale across domain
-            // reloads. Use ExistingInstance (not Instance) — we may be inside
-            // OnValidate where Instantiate would parent a new GameObject and
-            // trip "OnTransformChildrenChanged during OnValidate". If the
-            // atlas is genuinely gone, the editor poll resurrects it next tick.
+            // reloads. Use ExistingInstance first — we may be inside OnValidate
+            // where Instantiate would parent a new GameObject and trip
+            // "OnTransformChildrenChanged during OnValidate". If we're at
+            // runtime (not OnValidate), it's safe to fall back to Instance,
+            // which auto-spawns the atlas from Resources if needed. Without
+            // this fallback, a MeshImage that wakes up before any atlas
+            // exists in the scene would silently never register — common in
+            // builds where loading order isn't guaranteed.
             if (_atlas == null) _atlas = MeshImageAtlas.ExistingInstance;
+            if (_atlas == null && Application.isPlaying) _atlas = MeshImageAtlas.Instance;
             if (_atlas == null) return;
 
             if (texture == null && _atlas.Texture != null) texture = _atlas.Texture;

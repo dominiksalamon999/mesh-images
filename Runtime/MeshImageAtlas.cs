@@ -1,8 +1,8 @@
 ﻿using System.Collections.Generic;
-using System.Reflection;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using static MeshImages.MeshImageAtlasUtility;
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -14,16 +14,14 @@ namespace MeshImages
     [ExecuteAlways]
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Camera))]
-    public class MeshImageAtlas : MonoBehaviour
+    public partial class MeshImageAtlas : MonoBehaviour
     {
         // ---------------- Constants & nested ----------------
         private const float MinFitDimension = 1e-5f;
-        private const string SlotName = "MeshImage_Slot";
         private const int AtlasSize = 1536;
         private const GraphicsFormat AtlasColorFormat = GraphicsFormat.R8G8B8A8_SRGB;
         private const GraphicsFormat AtlasDepthFormat = GraphicsFormat.D24_UNorm_S8_UInt;
 
-        private struct Slot { public GameObject Go; public MeshFilter Filter; public MeshRenderer Renderer; }
         private struct AtlasEntry
         {
             public int Slot; public Mesh Mesh; public Material Material;
@@ -53,34 +51,25 @@ namespace MeshImages
         [Tooltip("Idle re-render rate cap (fps). Changes always render immediately. 0 = no idle re-renders.")]
         [SerializeField] private float renderFps = 5f;
 
-       
         // ---------------- State ----------------
         private readonly Dictionary<MeshImage, AtlasEntry> _pairs = new();
-        private readonly Queue<int> _freeSlots = new();
-        private readonly Queue<int> _pendingDeactivate = new();
-        private Slot[] _slots;
-        private int _nextSlot, _builtGridSize = -1, _resolvedPreviewLayer, _lastCullingMask = -1;
+        private readonly MeshImageSlotPool _pool = new();
+        private int _resolvedPreviewLayer, _lastCullingMask = -1;
         private double _lastRenderTime;
-        private bool _dirty = true, _autoSpawned, _srpFallbackWarned;
+        private bool _dirty = true, _autoSpawned;
         private RenderTexture atlasTexture;
-
-        private static MethodInfo _setActiveMethod;
 
         private static bool _isQuitting;
         private static MeshImageAtlas _instance;
-
-#if UNITY_EDITOR
-        private bool _editorRenderQueued, _deactivateQueued;
-#endif
 
         // ---------------- Properties ----------------
         public RenderTexture Texture => atlasTexture;
         public Camera Camera => atlasCamera;
 
         private float ViewHalfExtent => atlasCamera != null ? atlasCamera.orthographicSize : 0f;
-        private float CellSize => 2f * ViewHalfExtent / gridSize;
-        private float CellFillSize => objectFillFraction * CellSize;
+        private float CellFillSize => objectFillFraction * (2f * ViewHalfExtent / gridSize);
         private int MaxSlots => gridSize * gridSize;
+        private SlotLayoutConfig LayoutConfig => new(gridSize, uvPaddingFraction, previewDepth, ViewHalfExtent);
 
         // ---------------- Singleton ----------------
         public static MeshImageAtlas Instance
@@ -146,8 +135,7 @@ namespace MeshImages
         internal void Remove(MeshImage image)
         {
             if (image == null || !_pairs.TryGetValue(image, out var entry)) return;
-            ClearSlot(entry.Slot);
-            _freeSlots.Enqueue(entry.Slot);
+            _pool.ReleaseSlot(entry.Slot);
             _pairs.Remove(image);
             MarkDirty();
         }
@@ -179,9 +167,8 @@ namespace MeshImages
             _resolvedPreviewLayer = ResolvePreviewLayer();
             _lastCullingMask = atlasCamera.cullingMask;
 
-            BuildSlotPool();
+            _pool.Build(transform, gridSize, _resolvedPreviewLayer);
             ValidateConfiguration();
-    
 
             // Re-place registrations carried across disable/enable so
             // MeshImages aren't stranded on a released RT.
@@ -195,13 +182,12 @@ namespace MeshImages
         private void OnDisable()
         {
             // Keep _pairs across disable so re-enabling can re-place every image.
-            DestroySlotPool();
+            _pool.Destroy();
             ReleaseAtlasTexture();
 
 #if UNITY_EDITOR
             ToggleEditorHooks(false);
             _editorRenderQueued = _deactivateQueued = false;
-            _pendingDeactivate.Clear();
 #endif
         }
 
@@ -222,7 +208,7 @@ namespace MeshImages
         {
             if (!Application.isPlaying) return;
             EnsurePoolMatchesGrid();
-            DrainPendingDeactivates();
+            _pool.DrainPendingDeactivates();
             TryRender(Time.unscaledTimeAsDouble);
         }
 
@@ -236,7 +222,7 @@ namespace MeshImages
 
             EnsurePoolMatchesGrid();
 
-            if (!TryAcquireSlot(out int slot))
+            if (!_pool.TryAcquireSlot(out int slot))
             {
                 Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': atlas is full " +
                                  $"({MaxSlots} slots); cannot place '{image.name}'. " +
@@ -265,17 +251,18 @@ namespace MeshImages
                     centerOffset = new Vector3(-rotated.center.x, -rotated.center.y, 0f);
                 }
 
-                var s = _slots[slot];
+                var cfg = LayoutConfig;
+                var s = _pool[slot];
                 s.Filter.sharedMesh = mesh;
                 s.Renderer.sharedMaterial = material;
 
                 var t = s.Go.transform;
                 t.localScale = finalScale;
                 t.localEulerAngles = eulerRotation;
-                t.localPosition = GetSlotLocalPosition(slot, position) + centerOffset;
+                t.localPosition = MeshImageSlotPool.GetSlotLocalPosition(slot, position, in cfg) + centerOffset;
                 s.Go.SetActive(true);
 
-                image.SetUvFromAtlas(GetSlotUvRect(slot));
+                image.SetUvFromAtlas(MeshImageSlotPool.GetSlotUvRect(slot, in cfg));
                 image.texture = atlasTexture;
 
                 _pairs[image] = new AtlasEntry
@@ -292,104 +279,18 @@ namespace MeshImages
             }
             catch
             {
-                ClearSlot(slot);
-                _freeSlots.Enqueue(slot);
+                _pool.ReleaseSlot(slot);
                 _pairs.Remove(image);
                 throw;
             }
         }
 
-        // ---------------- Slot pool ----------------
-        private void BuildSlotPool()
-        {
-            DestroySlotPool();
-            _slots = new Slot[MaxSlots];
-
-            for (int i = 0; i < _slots.Length; i++)
-            {
-                var go = new GameObject($"{SlotName}_{i}", typeof(MeshFilter), typeof(MeshRenderer))
-                { hideFlags = HideFlags.HideAndDontSave, layer = _resolvedPreviewLayer };
-                go.transform.SetParent(transform, false);
-                go.SetActive(false);
-
-                var mr = go.GetComponent<MeshRenderer>();
-                mr.shadowCastingMode = ShadowCastingMode.Off;
-                mr.receiveShadows = false;
-                mr.lightProbeUsage = LightProbeUsage.Off;
-                mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
-
-                _slots[i] = new Slot { Go = go, Filter = go.GetComponent<MeshFilter>(), Renderer = mr };
-            }
-
-            _builtGridSize = gridSize;
-            ResetSlotBookkeeping();
-        }
-
-        private void DestroySlotPool()
-        {
-            if (_slots != null)
-                for (int i = 0; i < _slots.Length; i++)
-                    if (_slots[i].Go != null) DestroySafe(_slots[i].Go);
-            _slots = null;
-            _builtGridSize = -1;
-            ResetSlotBookkeeping();
-        }
-
-        private void ResetSlotBookkeeping()
-        {
-            _freeSlots.Clear();
-            _pendingDeactivate.Clear();
-            _nextSlot = 0;
-        }
-
-        private void ClearSlot(int slot)
-        {
-            if (_slots == null || slot < 0 || slot >= _slots.Length) return;
-            var s = _slots[slot];
-            if (s.Filter != null) s.Filter.sharedMesh = null;
-            if (s.Renderer != null) s.Renderer.sharedMaterial = null;
-            // SetActive(false) fires OnBecameInvisible, forbidden during
-            // OnValidate/Awake/CheckConsistency. Defer it. If a subsequent
-            // Add re-uses this slot, TryAdd's SetActive(true) wins and the
-            // deferred deactivate is a no-op.
-            if (s.Go != null) QueueDeactivate(slot);
-        }
-
-        private void QueueDeactivate(int slot)
-        {
-            _pendingDeactivate.Enqueue(slot);
-#if UNITY_EDITOR
-            if (!Application.isPlaying && !_deactivateQueued)
-            {
-                _deactivateQueued = true;
-                EditorApplication.QueuePlayerLoopUpdate();
-                EditorApplication.update += FlushPendingDeactivates;
-            }
-            // Play mode: LateUpdate drains the queue unconditionally.
-#endif
-        }
-
-        private void DrainPendingDeactivates()
-        {
-            if (_slots == null) { _pendingDeactivate.Clear(); return; }
-
-            while (_pendingDeactivate.Count > 0)
-            {
-                int slot = _pendingDeactivate.Dequeue();
-                if (slot < 0 || slot >= _slots.Length) continue;
-                var s = _slots[slot];
-                if (s.Go == null) continue;
-                // If the slot was re-acquired since deferral, leave it active.
-                if (s.Filter != null && s.Filter.sharedMesh != null) continue;
-                s.Go.SetActive(false);
-            }
-        }
-
+        // ---------------- Pool coordination ----------------
         // Rebuild the pool if gridSize changed; re-place existing entries.
         private void EnsurePoolMatchesGrid()
         {
-            if (_slots != null && _builtGridSize == gridSize) return;
-            BuildSlotPool();
+            if (!_pool.NeedsRebuild(gridSize)) return;
+            _pool.Build(transform, gridSize, _resolvedPreviewLayer);
             ReplaceCarriedEntries();
         }
 
@@ -415,31 +316,6 @@ namespace MeshImages
                 Debug.LogWarning($"{nameof(MeshImageAtlas)} on '{name}': dropped {dropped} of " +
                                  $"{carry.Count} image(s) while rebuilding pool — capacity is " +
                                  $"{MaxSlots} slots. See per-image warnings above for names.", this);
-        }
-
-        // ---------------- Slot math ----------------
-        private bool TryAcquireSlot(out int slot)
-        {
-            if (_freeSlots.Count > 0) { slot = _freeSlots.Dequeue(); return true; }
-            if (_nextSlot >= MaxSlots) { slot = -1; return false; }
-            slot = _nextSlot++;
-            return true;
-        }
-
-        private Rect GetSlotUvRect(int slot)
-        {
-            float v = 1f / gridSize, pad = v * uvPaddingFraction;
-            int col = slot % gridSize, row = slot / gridSize;
-            return new Rect(col * v + pad, (1f - v) - row * v + pad, v - 2f * pad, v - 2f * pad);
-        }
-
-        private Vector3 GetSlotLocalPosition(int slot, Vector3 offset)
-        {
-            int col = slot % gridSize, row = slot / gridSize;
-            float cell = CellSize, half = ViewHalfExtent;
-            return new Vector3(-half + (col + 0.5f) * cell,
-                               +half - (row + 0.5f) * cell,
-                               previewDepth) + offset;
         }
 
         // ---------------- Atlas texture ----------------
@@ -512,20 +388,14 @@ namespace MeshImages
         {
             if (GraphicsSettings.currentRenderPipeline != null)
             {
-                var req = new RenderPipeline.StandardRequest
-                {
-                    destination = atlasTexture
-                };
-
+                var req = new RenderPipeline.StandardRequest { destination = atlasTexture };
                 if (RenderPipeline.SupportsRenderRequest(atlasCamera, req))
                 {
                     RenderPipeline.SubmitRenderRequest(atlasCamera, req);
                     return;
                 }
-
                 Debug.LogWarning("SRP does not support render requests.");
             }
-
             atlasCamera.Render();
         }
 
@@ -551,7 +421,6 @@ namespace MeshImages
         private int ResolvePreviewLayer()
         {
             int mask = atlasCamera.cullingMask;
-            if (mask == 0) return 0;
             for (int i = 0; i < 32; i++)
                 if ((mask & (1 << i)) != 0) return i;
             return 0;
@@ -559,7 +428,7 @@ namespace MeshImages
 
         private void RefreshPreviewLayerIfNeeded()
         {
-            if (atlasCamera == null || _slots == null) return;
+            if (atlasCamera == null || _pool.Capacity == 0) return;
             int mask = atlasCamera.cullingMask;
             if (mask == _lastCullingMask) return;
             _lastCullingMask = mask;
@@ -568,147 +437,7 @@ namespace MeshImages
             if (newLayer == _resolvedPreviewLayer) return;
             _resolvedPreviewLayer = newLayer;
 
-            for (int i = 0; i < _slots.Length; i++)
-                if (_slots[i].Go != null) _slots[i].Go.layer = newLayer;
+            _pool.SetPreviewLayer(newLayer);
         }
-
-        // ---------------- Helpers ----------------
-        private static Bounds ComputeRotatedScaledAabb(Mesh mesh, Vector3 scale, Quaternion rotation)
-        {
-            var b = mesh.bounds;
-            Vector3 c = b.center, e = b.extents;
-            var min = Vector3.positiveInfinity;
-            var max = Vector3.negativeInfinity;
-
-            for (int i = 0; i < 8; i++)
-            {
-                var corner = new Vector3(
-                    c.x + (((i & 1) == 0) ? +e.x : -e.x),
-                    c.y + (((i & 2) == 0) ? +e.y : -e.y),
-                    c.z + (((i & 4) == 0) ? +e.z : -e.z));
-                var transformed = rotation * Vector3.Scale(corner, scale);
-                min = Vector3.Min(min, transformed);
-                max = Vector3.Max(max, transformed);
-            }
-
-            var result = new Bounds();
-            result.SetMinMax(min, max);
-            return result;
-        }
-
-        private static void DestroySafe(Object obj)
-        {
-            if (obj == null) return;
-#if UNITY_EDITOR
-            if (!Application.isPlaying) { DestroyImmediate(obj); return; }
-#endif
-            Destroy(obj);
-        }
-
-        // ---------------- Editor only ----------------
-#if UNITY_EDITOR
-        // OnApplicationQuit sets _isQuitting on every play-mode exit. Without
-        // resetting it, the static survives the play→edit transition (no
-        // domain reload by default) and Instance returns null for the rest of
-        // the edit session — silently breaking every MeshImage.
-        [InitializeOnLoadMethod]
-        private static void EditorInit()
-        {
-            _isQuitting = false;
-            EditorApplication.playModeStateChanged -= OnPlayModeStateChanged;
-            EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
-        }
-
-        private static void OnPlayModeStateChanged(PlayModeStateChange state)
-        {
-            if (state == PlayModeStateChange.ExitingPlayMode) _isQuitting = true;
-            else if (state == PlayModeStateChange.EnteredEditMode) _isQuitting = false;
-        }
-
-        // Single sub/unsub point. on=true subscribes (after a defensive unsub);
-        // on=false just unsubscribes everything this instance attached.
-        private void ToggleEditorHooks(bool on)
-        {
-            EditorApplication.update -= OnEditorUpdate;
-            EditorApplication.update -= EditorRenderOnce;
-            EditorApplication.update -= FlushPendingDeactivates;
-            EditorSceneManager.sceneOpened -= OnEditorSceneOpened;
-            EditorSceneManager.sceneClosing -= OnEditorSceneClosing;
-            EditorApplication.playModeStateChanged -= OnPlayModeStateChangedInstance;
-            if (!on) return;
-
-            EditorApplication.update += OnEditorUpdate;
-            EditorApplication.delayCall += EditorRegisterAllImages;
-            EditorSceneManager.sceneOpened += OnEditorSceneOpened;
-            // Auto-spawned atlases must be destroyed before scene close and
-            // before play-mode entry, or Unity logs "Some objects were not
-            // cleaned up when closing the scene."
-            EditorSceneManager.sceneClosing += OnEditorSceneClosing;
-            EditorApplication.playModeStateChanged += OnPlayModeStateChangedInstance;
-        }
-
-        private void OnEditorUpdate()
-        {
-            if (this == null) { EditorApplication.update -= OnEditorUpdate; return; }
-            if (Application.isPlaying) return;
-            EnsurePoolMatchesGrid();
-            DrainPendingDeactivates();
-            TryRender(EditorApplication.timeSinceStartup);
-        }
-
-        private void QueueEditorRender()
-        {
-            if (_editorRenderQueued) return;
-            _editorRenderQueued = true;
-            EditorApplication.QueuePlayerLoopUpdate();
-            EditorApplication.update += EditorRenderOnce;
-        }
-
-        private void EditorRenderOnce()
-        {
-            EditorApplication.update -= EditorRenderOnce;
-            _editorRenderQueued = false;
-            if (this == null || Application.isPlaying) return;
-            if (atlasCamera == null || atlasTexture == null) return;
-            if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
-
-            TryRender(EditorApplication.timeSinceStartup);
-            SceneView.RepaintAll();
-            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
-        }
-
-        private void FlushPendingDeactivates()
-        {
-            EditorApplication.update -= FlushPendingDeactivates;
-            _deactivateQueued = false;
-            DrainPendingDeactivates();
-        }
-
-        private void OnEditorSceneOpened(UnityEngine.SceneManagement.Scene scene, OpenSceneMode mode)
-            => EditorApplication.delayCall += EditorRegisterAllImages;
-
-        // Auto-spawned atlases live in whichever scene was active when created.
-        // If the user closes/changes scene or enters play mode, Unity warns
-        // about "objects not cleaned up." We pre-empt that.
-        private void OnEditorSceneClosing(UnityEngine.SceneManagement.Scene scene, bool removingScene)
-        {
-            if (!_autoSpawned || gameObject.scene != scene) return;
-            DestroySafe(gameObject);
-        }
-
-        private void OnPlayModeStateChangedInstance(PlayModeStateChange state)
-        {
-            if (_autoSpawned && state == PlayModeStateChange.ExitingEditMode)
-                DestroySafe(gameObject);
-        }
-
-        private void EditorRegisterAllImages()
-        {
-            if (this == null || Application.isPlaying) return;
-            var images = Object.FindObjectsByType<MeshImage>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            foreach (var img in images)
-                if (img != null && img.isActiveAndEnabled) img.EditorReregister();
-        }
-#endif
     }
 }

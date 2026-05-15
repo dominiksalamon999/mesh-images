@@ -213,8 +213,7 @@ namespace MeshImages
         }
 
         // ---------------- Add pipeline ----------------
-        private bool TryAdd(MeshImage image, Mesh mesh, Material material,
-                            Vector3 position, Vector3 eulerRotation, Vector3 scale)
+        private bool TryAdd(MeshImage image, Mesh mesh, Material material, Vector3 position, Vector3 eulerRotation, Vector3 scale)
         {
             if (image == null || _pairs.ContainsKey(image)) return false;
             if (material == null) material = defaultMaterial;

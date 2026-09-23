@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -44,25 +43,18 @@ namespace MeshImages
 
     /// <summary>
     /// Fixed-capacity pool of grid cells holding preview meshes for the atlas.
-    /// Owns the <see cref="Slot"/> array, the free list, and the deferred-deactivate
-    /// queue. Knows nothing about MeshImages, render textures, or play/edit mode —
-    /// callers thread the layout config and a deactivate-defer callback in.
+    /// Owns the <see cref="Slot"/> array and the free list. Knows nothing about
+    /// MeshImages, render textures, or play/edit mode; callers thread the layout
+    /// config in. Slot GameObjects stay active: renderers are hidden with
+    /// forceRenderingOff, and a free slot simply has no mesh.
     /// </summary>
     internal sealed class MeshImageSlotPool
     {
         private const string SlotName = "MeshImage_Slot";
 
         private readonly Queue<int> _freeSlots = new();
-        private readonly Queue<int> _pendingDeactivate = new();
         private Slot[] _slots;
         private int _nextSlot, _builtGridSize = -1;
-
-        /// <summary>
-        /// Fires when <see cref="ReleaseSlot"/> enqueues a slot for deferred
-        /// deactivation. The atlas uses this to wire up an editor-update tick
-        /// during edit mode (LateUpdate handles play mode itself).
-        /// </summary>
-        public event Action DeactivateQueued;
 
         public int Capacity => _slots?.Length ?? 0;
         public Slot this[int slot] => _slots[slot];
@@ -72,7 +64,7 @@ namespace MeshImages
 
         /// <summary>
         /// Tear down and recreate the slot GameObjects under <paramref name="parent"/>.
-        /// All bookkeeping (free list, deactivate queue, next-slot cursor) is reset;
+        /// All bookkeeping (free list, next-slot cursor) is reset;
         /// callers are responsible for re-placing any registrations they were tracking.
         /// </summary>
         public void Build(Transform parent, int gridSize, int previewLayer)
@@ -86,20 +78,20 @@ namespace MeshImages
                 var go = new GameObject($"{SlotName}_{i}", typeof(MeshFilter), typeof(MeshRenderer))
                 { hideFlags = HideFlags.HideAndDontSave, layer = previewLayer };
                 go.transform.SetParent(parent, false);
-                go.SetActive(false);
 
                 var mr = go.GetComponent<MeshRenderer>();
                 mr.shadowCastingMode = ShadowCastingMode.Off;
                 mr.receiveShadows = false;
                 mr.lightProbeUsage = LightProbeUsage.Off;
                 mr.reflectionProbeUsage = ReflectionProbeUsage.Off;
+                // Hidden from every camera except during the atlas render.
+                mr.forceRenderingOff = true;
 
                 _slots[i] = new Slot { Go = go, Filter = go.GetComponent<MeshFilter>(), Renderer = mr };
             }
 
             _builtGridSize = gridSize;
             _freeSlots.Clear();
-            _pendingDeactivate.Clear();
             _nextSlot = 0;
         }
 
@@ -112,7 +104,6 @@ namespace MeshImages
             _slots = null;
             _builtGridSize = -1;
             _freeSlots.Clear();
-            _pendingDeactivate.Clear();
             _nextSlot = 0;
         }
 
@@ -127,52 +118,14 @@ namespace MeshImages
             return true;
         }
 
-        /// <summary>
-        /// Clear the slot's mesh/material, defer the SetActive(false) (forbidden in
-        /// some Unity callbacks), and return the slot to the free pool. If a deactivate
-        /// was actually queued, raises <see cref="DeactivateQueued"/> exactly once per
-        /// release so the caller can schedule an editor-update tick if needed.
-        /// </summary>
+        /// <summary>Clear the slot's mesh/material and return it to the free pool.</summary>
         public void ReleaseSlot(int slot)
         {
             if (_slots == null || slot < 0 || slot >= _slots.Length) return;
             var s = _slots[slot];
             if (s.Filter != null) s.Filter.sharedMesh = null;
             if (s.Renderer != null) s.Renderer.sharedMaterial = null;
-
-            // SetActive(false) fires OnBecameInvisible, forbidden during
-            // OnValidate/Awake/CheckConsistency. Defer it. If the slot is
-            // re-acquired before the drain runs, TryAdd's SetActive(true)
-            // wins and DrainPendingDeactivates skips it.
-            bool queued = false;
-            if (s.Go != null)
-            {
-                _pendingDeactivate.Enqueue(slot);
-                queued = true;
-            }
             _freeSlots.Enqueue(slot);
-
-            if (queued) DeactivateQueued?.Invoke();
-        }
-
-        /// <summary>
-        /// Apply the deferred SetActive(false) to slots queued by <see cref="ReleaseSlot"/>.
-        /// Skips slots that have been re-acquired since they were queued.
-        /// </summary>
-        public void DrainPendingDeactivates()
-        {
-            if (_slots == null) { _pendingDeactivate.Clear(); return; }
-
-            while (_pendingDeactivate.Count > 0)
-            {
-                int slot = _pendingDeactivate.Dequeue();
-                if (slot < 0 || slot >= _slots.Length) continue;
-                var s = _slots[slot];
-                if (s.Go == null) continue;
-                // If the slot was re-acquired since deferral, leave it active.
-                if (s.Filter != null && s.Filter.sharedMesh != null) continue;
-                s.Go.SetActive(false);
-            }
         }
 
         /// <summary>Restamp every slot GameObject's layer. Called when the atlas detects a culling-mask change.</summary>
@@ -181,6 +134,14 @@ namespace MeshImages
             if (_slots == null) return;
             for (int i = 0; i < _slots.Length; i++)
                 if (_slots[i].Go != null) _slots[i].Go.layer = newLayer;
+        }
+
+        /// <summary>Toggle slot renderers on only for the duration of the atlas camera render.</summary>
+        public void SetRenderingEnabled(bool on)
+        {
+            if (_slots == null) return;
+            for (int i = 0; i < _slots.Length; i++)
+                if (_slots[i].Renderer != null) _slots[i].Renderer.forceRenderingOff = !on;
         }
 
         /// <summary>

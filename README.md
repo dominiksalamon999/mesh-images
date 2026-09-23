@@ -12,7 +12,13 @@ Features
 - Lightweight and extensible
 - Designed for tooling, inventories, previews, and UI displays
 
+Requirements
+- Unity 6 (6000.0) or newer
+
 Installation
 
-Via Git URL (Unity Package Manager)
-"com.dominiksalamon.mesh-images": "https://github.com/dominiksalamon999/mesh-images.git"
+Via Git URL (Unity Package Manager): Window > Package Manager > + > Add package from git URL:
+https://github.com/dominiksalamon999/mesh-images.git
+
+Or add this line to the "dependencies" in Packages/manifest.json:
+"com.dominiksalamon999.mesh-images": "https://github.com/dominiksalamon999/mesh-images.git"

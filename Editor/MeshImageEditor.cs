@@ -7,13 +7,14 @@ namespace MeshImages.Editor
     [CanEditMultipleObjects]
     public class MeshImageEditor : RawImageEditor
     {
+        // Texture, UV rect and UI material are driven by the atlas; everything
+        // else (Color, Raycast Target, Maskable, mesh settings) stays editable.
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
             DrawPropertiesExcluding(serializedObject,
-                "m_Script", "m_Texture", "m_Color", "m_RaycastTarget",
-                "m_RaycastPadding", "m_Maskable", "m_Material",
-                "m_OnCullStateChanged", "m_UVRect");
+                "m_Script", "m_Texture", "m_Material",
+                "m_OnCullStateChanged", "m_UVRect", "m_RaycastPadding");
             serializedObject.ApplyModifiedProperties();
         }
     }

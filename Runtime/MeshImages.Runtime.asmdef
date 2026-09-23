@@ -1,7 +1,9 @@
 {
     "name": "MeshImages.Runtime",
     "rootNamespace": "MeshImages",
-    "references": [],
+    "references": [
+        "Unity.RenderPipelines.Universal.Runtime"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
@@ -9,6 +11,12 @@
     "precompiledReferences": [],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.render-pipelines.universal",
+            "expression": "",
+            "define": "MESHIMAGES_URP"
+        }
+    ],
     "noEngineReferences": false
 }

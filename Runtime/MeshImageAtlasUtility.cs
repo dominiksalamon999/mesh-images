@@ -39,5 +39,22 @@ namespace MeshImages
 #endif
             Object.Destroy(obj);
         }
+
+        /// <summary>
+        /// Destroy <paramref name="obj"/> later instead of right now. Use from
+        /// callbacks like OnEnable, where an immediate edit-mode destroy is unsafe.
+        /// </summary>
+        public static void DestroyDeferred(Object obj)
+        {
+            if (obj == null) return;
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                UnityEditor.EditorApplication.delayCall += () => { if (obj != null) Object.DestroyImmediate(obj); };
+                return;
+            }
+#endif
+            Object.Destroy(obj);
+        }
     }
 }

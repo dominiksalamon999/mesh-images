@@ -1,0 +1,2 @@
+# Store text with LF in the repository, whatever core.autocrlf says.
+* text=auto

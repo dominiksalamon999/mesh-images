@@ -18,8 +18,13 @@ namespace MeshImages
         [SerializeField] private Vector3 translation;
         [SerializeField] private Vector3 rotation;
         [SerializeField] private Vector3 scale = Vector3.one;
+        [Tooltip("Fit the square atlas cell inside this rect instead of stretching it to the rect's shape.")]
+        [SerializeField] private bool preserveAspect;
 
         private bool _registered;
+        // The values this image was last placed with, so an animation frame
+        // that leaves them unchanged doesn't re-place it.
+        [System.NonSerialized] private (Mesh mesh, Material material, Vector3 translation, Vector3 rotation, Vector3 scale) _placedWith;
         // True only while the atlas holds a slot for us; otherwise draw nothing
         // rather than the whole atlas or a slot now owned by another image.
         private bool _placed;
@@ -69,6 +74,13 @@ namespace MeshImages
             set { if (scale == value) return; scale = value; Reregister(); }
         }
 
+        /// <summary>Fit the square cell inside the rect instead of stretching it.</summary>
+        public bool PreserveAspect
+        {
+            get => preserveAspect;
+            set { if (preserveAspect == value) return; preserveAspect = value; SetVerticesDirty(); }
+        }
+
         /// <summary>
         /// Apply many fields atomically, with one re-register at the end.
         /// Null arguments leave a field unchanged; use the properties to clear one.
@@ -87,6 +99,7 @@ namespace MeshImages
 
         internal bool IsPlaced => _placed;
         internal Rect SlotUv => _slotUv;
+        internal bool IsWaitingForAtlas => s_waitingForAtlas.Contains(this);
 
         public override Texture mainTexture => _placed && _atlasTexture != null ? _atlasTexture : base.mainTexture;
 
@@ -116,17 +129,19 @@ namespace MeshImages
         private void Register()
         {
             // Disabled components and prefab assets (which get OnValidate but
-            // are never active) must not hold an atlas slot. Without a mesh
-            // there is nothing to place; the Mesh setter re-registers.
-            if (_registered || !isActiveAndEnabled || mesh == null) return;
+            // are never active) must not hold an atlas slot.
+            if (_registered || !isActiveAndEnabled) return;
+            // Without a mesh there is nothing to place or wait for; the Mesh
+            // setter re-registers.
+            if (mesh == null) { SetWaitingForAtlas(false); return; }
 
             // Look up without spawning first (spawning is unsafe in some editor
             // callbacks). In play mode, spawn if needed: load order isn't
             // guaranteed, so the atlas may not exist yet.
             if (_atlas == null) _atlas = AtlasRegistry.ExistingFor(this);
             if (_atlas == null && Application.isPlaying) _atlas = AtlasRegistry.GetOrSpawn();
-            // Not placed (no atlas yet, atlas full): wait. An atlas retries
-            // waiting images when it activates or frees a slot.
+            // Not placed (no atlas yet, atlas full, no material): wait. An atlas
+            // retries waiting images when it activates, frees a slot or changes settings.
             if (_atlas == null || !_atlas.Add(this, mesh, meshMaterial, translation, rotation, scale))
             {
                 _atlas = null;
@@ -134,6 +149,7 @@ namespace MeshImages
                 return;
             }
             _registered = true;
+            _placedWith = (mesh, meshMaterial, translation, rotation, scale);
             SetWaitingForAtlas(false);
         }
 
@@ -186,7 +202,15 @@ namespace MeshImages
             _atlas = null;
             _registered = false;
             ClearPlacement();
-            if (isActiveAndEnabled) SetWaitingForAtlas(true);
+            if (isActiveAndEnabled && mesh != null) SetWaitingForAtlas(true);
+        }
+
+        // An Animator writes the serialized fields directly, so no setter runs.
+        protected override void OnDidApplyAnimationProperties()
+        {
+            base.OnDidApplyAnimationProperties();
+            if (_registered && _placedWith.Equals((mesh, meshMaterial, translation, rotation, scale))) return;
+            Reregister();
         }
 
         // RawImage's quad, but with the runtime slot rect instead of the serialized m_UVRect.
@@ -196,7 +220,7 @@ namespace MeshImages
             Texture tex = mainTexture;
             if (!_placed || tex == null) return;
 
-            Rect r = GetPixelAdjustedRect();
+            Rect r = DrawRect;
             var v = new Vector4(r.x, r.y, r.x + r.width, r.y + r.height);
             float sx = tex.width * tex.texelSize.x, sy = tex.height * tex.texelSize.y;
             Color32 c = color;
@@ -206,6 +230,36 @@ namespace MeshImages
             vh.AddVert(new Vector3(v.z, v.y), c, new Vector2(_slotUv.xMax * sx, _slotUv.yMin * sy));
             vh.AddTriangle(0, 1, 2);
             vh.AddTriangle(2, 3, 0);
+        }
+
+        // The rect the quad covers: the whole rect, or with preserveAspect the
+        // largest rect with the slot's shape, placed by the pivot like Image does.
+        internal Rect DrawRect
+        {
+            get
+            {
+                Rect r = GetPixelAdjustedRect();
+                Texture tex = mainTexture;
+                if (!preserveAspect || tex == null || r.width <= 0f || r.height <= 0f) return r;
+
+                float slotH = _slotUv.height * tex.height;
+                if (slotH <= 0f) return r;
+                float slotAspect = _slotUv.width * tex.width / slotH;
+                Vector2 pivot = rectTransform.pivot;
+                if (slotAspect > r.width / r.height)
+                {
+                    float oldHeight = r.height;
+                    r.height = r.width / slotAspect;
+                    r.y += (oldHeight - r.height) * pivot.y;
+                }
+                else
+                {
+                    float oldWidth = r.width;
+                    r.width = r.height * slotAspect;
+                    r.x += (oldWidth - r.width) * pivot.x;
+                }
+                return r;
+            }
         }
 
         // ---------- Waiting for an atlas ----------

@@ -12,7 +12,7 @@ GameObject:
   - component: {fileID: 6785043919333939670}
   - component: {fileID: 3300627437550437546}
   - component: {fileID: 3110879680259153996}
-  m_Layer: 5
+  m_Layer: 31
   m_Name: MeshImageAtlas
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -73,7 +73,7 @@ Camera:
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
-    m_Bits: 32
+    m_Bits: 2147483648
   m_RenderingPath: -1
   m_TargetTexture: {fileID: 0}
   m_TargetDisplay: 0
@@ -98,7 +98,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: MeshImages.Runtime::MeshImages.MeshImageAtlas
   atlasCamera: {fileID: 6785043919333939670}
-  defaultMaterial: {fileID: 2100000, guid: 9a558da7d6521a942bf8855b3ecf47dc, type: 2}
+  defaultMaterial: {fileID: 2100000, guid: 94c5829efdb4471889a01955eee70c1b, type: 2}
   gridSize: 7
   objectFillFraction: 0.9
   uvPaddingFraction: 0.05

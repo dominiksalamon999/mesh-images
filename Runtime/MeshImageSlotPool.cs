@@ -128,6 +128,22 @@ namespace MeshImages
             _freeSlots.Enqueue(slot);
         }
 
+        /// <summary>
+        /// Free every slot without destroying the slot GameObjects. Used when
+        /// atlas settings change and every image is placed again.
+        /// </summary>
+        public void ReleaseAll()
+        {
+            if (_slots == null) return;
+            for (int i = 0; i < _slots.Length; i++)
+            {
+                if (_slots[i].Filter != null) _slots[i].Filter.sharedMesh = null;
+                if (_slots[i].Renderer != null) _slots[i].Renderer.sharedMaterial = null;
+            }
+            _freeSlots.Clear();
+            _nextSlot = 0;
+        }
+
         /// <summary>Restamp every slot GameObject's layer. Called when the atlas detects a culling-mask change.</summary>
         public void SetPreviewLayer(int newLayer)
         {

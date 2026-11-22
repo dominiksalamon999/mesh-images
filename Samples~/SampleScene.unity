@@ -179,10 +179,10 @@ MonoBehaviour:
   m_Texture: {fileID: 0}
   m_UVRect:
     serializedVersion: 2
-    x: 0.0071428576
-    y: 0.8642857
-    width: 0.12857144
-    height: 0.12857144
+    x: 0
+    y: 0
+    width: 1
+    height: 1
   mesh: {fileID: 10208, guid: 0000000000000000e000000000000000, type: 0}
   meshMaterial: {fileID: 2100000, guid: 9a558da7d6521a942bf8855b3ecf47dc, type: 2}
   translation: {x: 0, y: 0, z: 0}

@@ -100,6 +100,27 @@ namespace MeshImages.Tests
             Assert.AreSame(_atlas.Texture, img.mainTexture, "images must follow the rebuilt texture");
         }
 
+        // gridSize and cellResolution change together but their product (the
+        // atlas width) stays the same: the per-cell texture must still follow.
+        [Test]
+        public void CellTexture_FollowsCellResolution_WhenAtlasWidthStaysTheSame()
+        {
+            var so = new SerializedObject(_atlas);
+            so.FindProperty("gridSize").intValue = 7;
+            so.FindProperty("cellResolution").intValue = 64;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            _atlas.EnsureLayout();
+            int atlasWidth = _atlas.Texture.width;
+
+            so.FindProperty("gridSize").intValue = 14;
+            so.FindProperty("cellResolution").intValue = 32;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            _atlas.EnsureLayout();
+
+            Assert.AreEqual(atlasWidth, _atlas.Texture.width);
+            Assert.AreEqual(32, _atlas.CellTexture.width);
+        }
+
         [Test]
         public void CellRender_MatchesFullRender()
         {

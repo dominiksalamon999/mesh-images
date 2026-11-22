@@ -9,7 +9,11 @@ namespace MeshImages
         // What one image asked for, plus the slot it got.
         private struct AtlasEntry
         {
-            public int Slot; public Mesh Mesh; public Material Material;
+            public int Slot;
+            public Mesh Mesh;
+            // The image's own material (may be null) and the one actually drawn,
+            // so a defaultMaterial change can re-resolve on re-place.
+            public Material RequestedMaterial, Material;
             public Vector3 Translation, Rotation, Scale;
 
             public SlotKey Key => new(Mesh, Material, Translation, Rotation, Scale);
@@ -44,5 +48,41 @@ namespace MeshImages
         }
 
         private struct SharedSlot { public int Slot; public int RefCount; }
+
+        // Every atlas and camera setting, besides grid size and cell resolution,
+        // that decides where a slot sits or what it draws. When any of them
+        // changes, all images are re-placed and the atlas re-renders.
+        private readonly struct PlacementSettings : IEquatable<PlacementSettings>
+        {
+            private readonly Material _defaultMaterial;
+            private readonly float _fill, _padding, _depth, _halfExtent, _near, _far;
+            private readonly bool _autoFit, _autoCenter, _orthographic;
+            private readonly Color _background;
+
+            public PlacementSettings(Material defaultMaterial, float fill, float padding, float depth,
+                                     bool autoFit, bool autoCenter, Camera camera)
+            {
+                _defaultMaterial = defaultMaterial;
+                _fill = fill; _padding = padding; _depth = depth;
+                _autoFit = autoFit; _autoCenter = autoCenter;
+                bool hasCamera = camera != null;
+                _halfExtent = hasCamera ? camera.orthographicSize : 0f;
+                _near = hasCamera ? camera.nearClipPlane : 0f;
+                _far = hasCamera ? camera.farClipPlane : 0f;
+                _orthographic = hasCamera && camera.orthographic;
+                _background = hasCamera ? camera.backgroundColor : default;
+            }
+
+            public bool Equals(PlacementSettings o) =>
+                ReferenceEquals(_defaultMaterial, o._defaultMaterial) &&
+                _fill.Equals(o._fill) && _padding.Equals(o._padding) && _depth.Equals(o._depth) &&
+                _halfExtent.Equals(o._halfExtent) && _near.Equals(o._near) && _far.Equals(o._far) &&
+                _autoFit == o._autoFit && _autoCenter == o._autoCenter &&
+                _orthographic == o._orthographic && _background.Equals(o._background);
+
+            public override bool Equals(object obj) => obj is PlacementSettings o && Equals(o);
+
+            public override int GetHashCode() => HashCode.Combine(_fill, _padding, _depth, _halfExtent, _near, _far);
+        }
     }
 }

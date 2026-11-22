@@ -1,5 +1,7 @@
+using System.Reflection;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -39,7 +41,7 @@ namespace MeshImages.Tests
         {
             Object.DestroyImmediate(_canvas);
             foreach (var atlas in Resources.FindObjectsOfTypeAll<MeshImageAtlas>())
-                if (!UnityEditor.EditorUtility.IsPersistent(atlas))
+                if (!EditorUtility.IsPersistent(atlas))
                     Object.DestroyImmediate(atlas.gameObject);
         }
 
@@ -50,13 +52,32 @@ namespace MeshImages.Tests
             return go.AddComponent<MeshImage>();
         }
 
-        private static MeshImageAtlas SpawnSecondAtlas()
+        // An atlas the user put in the scene, as opposed to an auto-spawned one.
+        private static MeshImageAtlas PlaceAtlas()
             => Object.Instantiate(Resources.Load<MeshImageAtlas>("MeshImageAtlas"));
+
+        private static MeshImageAtlas LoadPrefab() => Resources.Load<MeshImageAtlas>("MeshImageAtlas");
 
         [Test]
         public void AutoSpawnedAtlas_IsNotSavedWithScene()
         {
             Assert.AreNotEqual(0, (int)(_atlas.gameObject.hideFlags & HideFlags.DontSaveInEditor));
+        }
+
+        [Test]
+        public void Prefab_ShipsItsDefaultMaterialInTheRuntimeFolder()
+        {
+            var material = new SerializedObject(LoadPrefab()).FindProperty("defaultMaterial").objectReferenceValue;
+            Assert.IsNotNull(material, "the atlas prefab needs a default material");
+            // Samples~ is never imported, so a material there is missing in other projects.
+            StringAssert.StartsWith("Packages/com.dominiksalamon999.mesh-images/Runtime/",
+                                    AssetDatabase.GetAssetPath(material));
+        }
+
+        [Test]
+        public void PrefabCamera_RendersOnlyLayer31()
+        {
+            Assert.AreEqual(1 << 31, LoadPrefab().GetComponent<Camera>().cullingMask);
         }
 
         [Test]
@@ -98,6 +119,30 @@ namespace MeshImages.Tests
             img.Mesh = null;
             Assert.IsFalse(img.IsPlaced);
             Assert.AreEqual(0, _atlas.UsedSlotCount);
+        }
+
+        [Test]
+        public void ClearingMesh_TakesWaitingImageOffTheWaitingList()
+        {
+            _atlas.enabled = false;
+            var img = CreateImage("A");
+            img.Mesh = _cube;
+            Assert.IsTrue(img.IsWaitingForAtlas);
+
+            img.Mesh = null;
+            Assert.IsFalse(img.IsWaitingForAtlas);
+        }
+
+        [Test]
+        public void ImageWithDestroyedMesh_DoesNotWait_WhenItsAtlasGoes()
+        {
+            var mesh = Object.Instantiate(_cube);
+            var img = CreateImage("A");
+            img.Mesh = mesh;
+            Object.DestroyImmediate(mesh);
+
+            Object.DestroyImmediate(_atlas.gameObject);
+            Assert.IsFalse(img.IsWaitingForAtlas);
         }
 
         [Test]
@@ -157,25 +202,45 @@ namespace MeshImages.Tests
         }
 
         [Test]
-        public void SecondAtlas_StaysIdleInEditMode()
+        public void PlacedAtlas_ReplacesAutoSpawnedAtlas()
         {
+            var img = CreateImage("A");
+            img.Mesh = _cube;
+
+            var placed = PlaceAtlas();
+            Assert.AreSame(placed, MeshImageAtlas.Instance);
+            Assert.IsFalse(_atlas.IsActive);
+            Assert.IsTrue(_atlas.IsRetired);
+            Assert.IsFalse(img.IsPlaced);
+
+            placed.ProcessPendingRetries();
+            Assert.IsTrue(img.IsPlaced);
+            Assert.AreSame(placed.Texture, img.mainTexture);
+        }
+
+        [Test]
+        public void SecondPlacedAtlas_StaysIdleInEditMode()
+        {
+            var main = PlaceAtlas();
             LogAssert.Expect(LogType.Warning, new Regex("stays idle"));
-            var second = SpawnSecondAtlas();
+            var second = PlaceAtlas();
 
             Assert.IsTrue(second != null, "second atlas must not be destroyed");
             Assert.IsNull(second.Texture);
-            Assert.AreSame(_atlas, MeshImageAtlas.Instance);
+            Assert.AreSame(main, MeshImageAtlas.Instance);
         }
 
         [Test]
         public void IdleAtlas_TakesOver_WhenMainAtlasIsDestroyed()
         {
+            var main = PlaceAtlas();
             var img = CreateImage("A");
             img.Mesh = _cube;
+            Assert.AreSame(main.Texture, img.mainTexture);
             LogAssert.Expect(LogType.Warning, new Regex("stays idle"));
-            var second = SpawnSecondAtlas();
+            var second = PlaceAtlas();
 
-            Object.DestroyImmediate(_atlas.gameObject);
+            Object.DestroyImmediate(main.gameObject);
             Assert.IsFalse(img.IsPlaced);
 
             Assert.AreSame(second, MeshImageAtlas.Instance);
@@ -196,13 +261,98 @@ namespace MeshImages.Tests
             Assert.AreEqual(1, _atlas.UsedSlotCount);
 
             // Same path as dragging a value in the inspector: serialized edit + OnValidate.
-            var so = new UnityEditor.SerializedObject(b);
+            var so = new SerializedObject(b);
             so.FindProperty("rotation").vector3Value = new Vector3(0f, 30f, 0f);
             so.ApplyModifiedPropertiesWithoutUndo();
 
             // No editor tick or delayCall has run yet; the change must already be placed.
             Assert.AreEqual(2, _atlas.UsedSlotCount);
             Assert.AreNotEqual(a.SlotUv, b.SlotUv);
+        }
+
+        // An Animator writes the fields directly and then sends this message.
+        [Test]
+        public void AnimatedField_ReplacesImage()
+        {
+            var a = CreateImage("A");
+            var b = CreateImage("B");
+            a.Mesh = _cube;
+            b.Mesh = _cube;
+            Assert.AreEqual(1, _atlas.UsedSlotCount);
+
+            typeof(MeshImage).GetField("rotation", BindingFlags.NonPublic | BindingFlags.Instance)
+                             .SetValue(b, new Vector3(0f, 30f, 0f));
+            b.SendMessage("OnDidApplyAnimationProperties");
+
+            Assert.AreEqual(2, _atlas.UsedSlotCount);
+            Assert.AreNotEqual(a.SlotUv, b.SlotUv);
+        }
+
+        [Test]
+        public void AtlasSettingChange_ReplacesPlacedImages()
+        {
+            var img = CreateImage("A");
+            img.Mesh = _cube;
+            var before = img.SlotUv;
+
+            var so = new SerializedObject(_atlas);
+            so.FindProperty("uvPaddingFraction").floatValue = 0.2f;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            _atlas.EnsureLayout();
+
+            Assert.IsTrue(img.IsPlaced);
+            Assert.AreNotEqual(before, img.SlotUv, "the new padding must reach the image");
+            Assert.AreEqual(1, _atlas.UsedSlotCount, "re-placing must not leak slots");
+        }
+
+        [Test]
+        public void RemovingDefaultMaterial_HidesImages_AndRestoringItPlacesThemAgain()
+        {
+            var img = CreateImage("A");
+            img.Mesh = _cube;   // no own material: uses the atlas default
+            Assert.IsTrue(img.IsPlaced);
+
+            var so = new SerializedObject(_atlas);
+            var prop = so.FindProperty("defaultMaterial");
+            var material = prop.objectReferenceValue;
+            prop.objectReferenceValue = null;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            _atlas.EnsureLayout();
+
+            Assert.IsFalse(img.IsPlaced);
+            Assert.IsTrue(img.IsWaitingForAtlas);
+
+            prop.objectReferenceValue = material;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            _atlas.EnsureLayout();
+            _atlas.ProcessPendingRetries();
+
+            Assert.IsTrue(img.IsPlaced);
+        }
+
+        [Test]
+        public void GridSize_IsCappedAtMax()
+        {
+            var so = new SerializedObject(_atlas);
+            so.FindProperty("gridSize").intValue = 1000;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            so.Update();
+            Assert.AreEqual(MeshImageAtlas.MaxGridSize, so.FindProperty("gridSize").intValue);
+        }
+
+        [Test]
+        public void PreserveAspect_FitsTheSquareCellInsideTheRect()
+        {
+            var img = CreateImage("A");
+            img.rectTransform.sizeDelta = new Vector2(200f, 100f);
+            img.Mesh = _cube;
+            Assert.AreEqual(new Vector2(200f, 100f), img.DrawRect.size);
+
+            img.PreserveAspect = true;
+            var r = img.DrawRect;
+            Assert.AreEqual(100f, r.width, 0.01f);
+            Assert.AreEqual(100f, r.height, 0.01f);
+            Assert.AreEqual(0f, r.center.x, 0.01f, "centered by the default pivot");
         }
 
         [Test]
@@ -231,7 +381,8 @@ namespace MeshImages.Tests
         [Test]
         public void ImageRejectedByFullAtlas_IsPlacedWhenASlotFrees()
         {
-            int capacity = 49; // prefab gridSize 7
+            int grid = new SerializedObject(_atlas).FindProperty("gridSize").intValue;
+            int capacity = grid * grid;
             var images = new MeshImage[capacity + 1];
             for (int i = 0; i < images.Length; i++)
             {
@@ -263,17 +414,18 @@ namespace MeshImages.Tests
         [Test]
         public void AtlasThatGoesIdle_HandsItsImagesToTheActiveAtlas()
         {
+            var main = PlaceAtlas();
             var img = CreateImage("A");
             img.Mesh = _cube;
             LogAssert.Expect(LogType.Warning, new Regex("stays idle"));
-            var second = SpawnSecondAtlas();
+            var second = PlaceAtlas();
 
             // Main switched off; the idle one gets promoted (e.g. by the editor poll).
-            _atlas.enabled = false;
+            main.enabled = false;
             Assert.AreSame(second, MeshImageAtlas.Instance);
 
             // Re-enabling the original makes it the idle one; its image must move over.
-            _atlas.enabled = true;
+            main.enabled = true;
             second.ProcessPendingRetries();
             Assert.IsTrue(img.IsPlaced);
             Assert.AreSame(second.Texture, img.mainTexture);

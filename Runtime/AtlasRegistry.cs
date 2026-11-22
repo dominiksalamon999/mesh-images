@@ -10,8 +10,9 @@ namespace MeshImages
     /// Decides which <see cref="MeshImageAtlas"/> is active and finds (or
     /// auto-spawns) one for images. An atlas is in one of four states:
     /// <list type="bullet">
-    /// <item><b>Active</b>: the one scene atlas all images use (claimed via <see cref="TryClaim"/>).</item>
-    /// <item><b>Idle</b>: an edit-mode duplicate; takes over if the active one goes away.</item>
+    /// <item><b>Active</b>: the one scene atlas all images use (claimed via <see cref="TryClaim"/>).
+    /// An atlas placed in a scene replaces an auto-spawned one.</item>
+    /// <item><b>Idle</b>: an edit-mode duplicate of a placed atlas; takes over if the active one goes away.</item>
     /// <item><b>Prefab mode</b>: active, but serves only images in the prefab being edited.</item>
     /// <item><b>Disabled</b>: switched off by the user; blocks auto-spawning a replacement.</item>
     /// </list>
@@ -119,6 +120,9 @@ namespace MeshImages
             foreach (var atlas in Object.FindObjectsByType<MeshImageAtlas>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
 #endif
+                // A retired atlas is on its way out (destroy is deferred); it
+                // neither serves images nor counts as switched off.
+                if (atlas.IsRetired) continue;
                 if (!atlas.isActiveAndEnabled) { disabledExists = true; continue; }
                 if (atlas.IsActive) return atlas;
                 if (idle == null) idle = atlas;

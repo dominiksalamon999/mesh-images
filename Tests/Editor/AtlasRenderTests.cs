@@ -48,7 +48,7 @@ namespace MeshImages.Tests
 
         private static int CellOf(MeshImage img, int gridSize)
         {
-            var uv = img.uvRect;
+            var uv = img.SlotUv;
             int col = Mathf.FloorToInt((uv.x + uv.width * 0.5f) * gridSize);
             int rowFromBottom = Mathf.FloorToInt((uv.y + uv.height * 0.5f) * gridSize);
             return (gridSize - 1 - rowFromBottom) * gridSize + col;
@@ -97,7 +97,7 @@ namespace MeshImages.Tests
 
             Assert.AreEqual(grid * 64, _atlas.Texture.width);
             Assert.IsTrue(img.IsPlaced);
-            Assert.AreSame(_atlas.Texture, img.texture, "images must follow the rebuilt texture");
+            Assert.AreSame(_atlas.Texture, img.mainTexture, "images must follow the rebuilt texture");
         }
 
         [Test]
@@ -108,12 +108,12 @@ namespace MeshImages.Tests
             var rt = _atlas.Texture;
 
             _atlas.RenderFull();
-            var full = ReadRegion(rt, img.uvRect);
+            var full = ReadRegion(rt, img.SlotUv);
             Assert.Greater(CountOpaque(full), full.Length / 10, "full render should draw the cube");
 
             Clear(rt);
             _atlas.RenderCells(new[] { CellOf(img, grid) });
-            var cell = ReadRegion(rt, img.uvRect);
+            var cell = ReadRegion(rt, img.SlotUv);
 
             int diff = 0;
             for (int i = 0; i < full.Length; i++)
@@ -136,8 +136,8 @@ namespace MeshImages.Tests
             Clear(rt);
             _atlas.RenderCells(new[] { CellOf(a, grid) });
 
-            Assert.Greater(CountOpaque(ReadRegion(rt, a.uvRect)), 0);
-            Assert.AreEqual(0, CountOpaque(ReadRegion(rt, b.uvRect)));
+            Assert.Greater(CountOpaque(ReadRegion(rt, a.SlotUv)), 0);
+            Assert.AreEqual(0, CountOpaque(ReadRegion(rt, b.SlotUv)));
         }
     }
 }

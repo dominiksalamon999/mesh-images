@@ -305,8 +305,7 @@ namespace MeshImages
                 shared.RefCount++;
                 _shared[key] = shared;
                 entry.Slot = shared.Slot;
-                image.SetUvFromAtlas(MeshImageSlotPool.GetSlotUvRect(shared.Slot, in cfg));
-                image.texture = _atlasTexture;
+                image.SetUvFromAtlas(MeshImageSlotPool.GetSlotUvRect(shared.Slot, in cfg), _atlasTexture);
                 _entries[image] = entry;
                 return true;
             }
@@ -351,8 +350,7 @@ namespace MeshImages
                 t.localEulerAngles = eulerRotation;
                 t.localPosition = MeshImageSlotPool.GetSlotLocalPosition(slot, translation, in cfg) + centerOffset;
 
-                image.SetUvFromAtlas(MeshImageSlotPool.GetSlotUvRect(slot, in cfg));
-                image.texture = _atlasTexture;
+                image.SetUvFromAtlas(MeshImageSlotPool.GetSlotUvRect(slot, in cfg), _atlasTexture);
 
                 entry.Slot = slot;
                 _shared[key] = new SharedSlot { Slot = slot, RefCount = 1 };

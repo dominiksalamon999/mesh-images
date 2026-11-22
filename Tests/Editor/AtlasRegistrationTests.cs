@@ -74,8 +74,20 @@ namespace MeshImages.Tests
             var img = CreateImage("A");
             img.Mesh = _cube;
             Assert.IsTrue(img.IsPlaced);
-            Assert.AreSame(_atlas.Texture, img.texture);
+            Assert.AreSame(_atlas.Texture, img.mainTexture);
             Assert.AreEqual(1, _atlas.UsedSlotCount);
+        }
+
+        // Placement is runtime state; a scene save must not record which slot an image got.
+        [Test]
+        public void Placement_LeavesSerializedUvRectAndTexture_Untouched()
+        {
+            var img = CreateImage("A");
+            img.Mesh = _cube;
+            Assert.IsTrue(img.IsPlaced);
+            Assert.AreNotEqual(new Rect(0f, 0f, 1f, 1f), img.SlotUv);
+            Assert.AreEqual(new Rect(0f, 0f, 1f, 1f), img.uvRect);
+            Assert.IsNull(img.texture);
         }
 
         [Test]
@@ -97,11 +109,11 @@ namespace MeshImages.Tests
             b.Mesh = _cube;
             Assert.AreEqual(2, _atlas.ImageCount);
             Assert.AreEqual(1, _atlas.UsedSlotCount);
-            Assert.AreEqual(a.uvRect, b.uvRect);
+            Assert.AreEqual(a.SlotUv, b.SlotUv);
 
             b.Rotation = new Vector3(0f, 45f, 0f);
             Assert.AreEqual(2, _atlas.UsedSlotCount);
-            Assert.AreNotEqual(a.uvRect, b.uvRect);
+            Assert.AreNotEqual(a.SlotUv, b.SlotUv);
         }
 
         [Test]
@@ -141,7 +153,7 @@ namespace MeshImages.Tests
 
             _atlas.enabled = true;
             Assert.IsTrue(img.IsPlaced);
-            Assert.AreSame(_atlas.Texture, img.texture);
+            Assert.AreSame(_atlas.Texture, img.mainTexture);
         }
 
         [Test]
@@ -171,7 +183,7 @@ namespace MeshImages.Tests
 
             second.ProcessPendingRetries();
             Assert.IsTrue(img.IsPlaced);
-            Assert.AreSame(second.Texture, img.texture);
+            Assert.AreSame(second.Texture, img.mainTexture);
         }
 
         [Test]
@@ -190,7 +202,7 @@ namespace MeshImages.Tests
 
             // No editor tick or delayCall has run yet; the change must already be placed.
             Assert.AreEqual(2, _atlas.UsedSlotCount);
-            Assert.AreNotEqual(a.uvRect, b.uvRect);
+            Assert.AreNotEqual(a.SlotUv, b.SlotUv);
         }
 
         [Test]
@@ -264,7 +276,7 @@ namespace MeshImages.Tests
             _atlas.enabled = true;
             second.ProcessPendingRetries();
             Assert.IsTrue(img.IsPlaced);
-            Assert.AreSame(second.Texture, img.texture);
+            Assert.AreSame(second.Texture, img.mainTexture);
         }
     }
 }

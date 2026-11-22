@@ -23,6 +23,10 @@ namespace MeshImages
         // True only while the atlas holds a slot for us; otherwise draw nothing
         // rather than the whole atlas or a slot now owned by another image.
         private bool _placed;
+        // Atlas placement is runtime state: kept off RawImage's serialized m_UVRect / m_Texture, so a scene or
+        // prefab save never records which slot this image happened to get (slots go in registration order).
+        [System.NonSerialized] private Rect _slotUv = new Rect(0f, 0f, 1f, 1f);
+        [System.NonSerialized] private Texture _atlasTexture;
         private MeshImageAtlas _atlas;
 #if UNITY_EDITOR
         // NonSerialized: a script reload keeps private fields but drops the
@@ -82,6 +86,9 @@ namespace MeshImages
         }
 
         internal bool IsPlaced => _placed;
+        internal Rect SlotUv => _slotUv;
+
+        public override Texture mainTexture => _placed && _atlasTexture != null ? _atlasTexture : base.mainTexture;
 
         // ---------- Lifecycle ----------
         protected override void OnEnable()
@@ -148,10 +155,16 @@ namespace MeshImages
             Register();
         }
 
-        internal void SetUvFromAtlas(Rect uv)
+        internal void SetUvFromAtlas(Rect uv, Texture atlasTexture)
         {
-            uvRect = uv;
-            if (_placed) return;
+            bool moved = _slotUv != uv;
+            _slotUv = uv;
+            if (_atlasTexture != atlasTexture)
+            {
+                _atlasTexture = atlasTexture;
+                SetMaterialDirty();   // Graphic re-reads mainTexture
+            }
+            if (_placed && !moved) return;
             _placed = true;
             SetVerticesDirty();
         }
@@ -160,6 +173,8 @@ namespace MeshImages
         {
             if (!_placed) return;
             _placed = false;
+            _atlasTexture = null;
+            SetMaterialDirty();
             SetVerticesDirty();
         }
 
@@ -174,10 +189,23 @@ namespace MeshImages
             if (isActiveAndEnabled) SetWaitingForAtlas(true);
         }
 
+        // RawImage's quad, but with the runtime slot rect instead of the serialized m_UVRect.
         protected override void OnPopulateMesh(VertexHelper vh)
         {
-            if (!_placed) { vh.Clear(); return; }
-            base.OnPopulateMesh(vh);
+            vh.Clear();
+            Texture tex = mainTexture;
+            if (!_placed || tex == null) return;
+
+            Rect r = GetPixelAdjustedRect();
+            var v = new Vector4(r.x, r.y, r.x + r.width, r.y + r.height);
+            float sx = tex.width * tex.texelSize.x, sy = tex.height * tex.texelSize.y;
+            Color32 c = color;
+            vh.AddVert(new Vector3(v.x, v.y), c, new Vector2(_slotUv.xMin * sx, _slotUv.yMin * sy));
+            vh.AddVert(new Vector3(v.x, v.w), c, new Vector2(_slotUv.xMin * sx, _slotUv.yMax * sy));
+            vh.AddVert(new Vector3(v.z, v.w), c, new Vector2(_slotUv.xMax * sx, _slotUv.yMax * sy));
+            vh.AddVert(new Vector3(v.z, v.y), c, new Vector2(_slotUv.xMax * sx, _slotUv.yMin * sy));
+            vh.AddTriangle(0, 1, 2);
+            vh.AddTriangle(2, 3, 0);
         }
 
         // ---------- Waiting for an atlas ----------
